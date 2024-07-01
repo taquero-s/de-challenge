@@ -1,0 +1,30 @@
+[tool.dagster]
+module_name = "src.orca"
+code_location_name = "Orca"
+
+[tool.poetry]
+name = "de-challenge"
+version = "0.0.0"
+description = "Bitso DE challenges"
+authors = ["Enrique Olivares"]
+license = "LICENSE"
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = ">=3.11,<3.12"
+requests = "^2.32.3"
+duckdb = "^1.0.0"
+pandas = "^2.2.2"
+typer = "^0.12.3"
+dagster = "^1.7.12"
+dagster-webserver = "^1.7.12"
+dagster-duckdb = "^0.23.12"
+dagster-duckdb-pandas = "^0.23.12"
+
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^8.2.2"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
