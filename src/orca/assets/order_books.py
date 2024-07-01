@@ -1,3 +1,6 @@
+"""Definition of order books assets 
+"""
+
 import datetime
 from pathlib import Path
 
@@ -16,34 +19,20 @@ from src.orca.resources import FilesystemResource
 
 PARTITION_DEF = TimeWindowPartitionsDefinition(
     start=datetime.datetime.now().replace(tzinfo=None),
-    cron_schedule="*/10 * * * *",
-    fmt="report_date=%Y-%m-%d/%H%M",
+    cron_schedule="*/10 * * * *",  # Cron schedule to run every 10 minutes
+    fmt="report_date=%Y-%m-%d/%H%M",  # Formatting as S3 partition for hive compatibility
 )
 
 
-@asset(
-    io_manager_key="pandas_csv_io_manager",
-    partitions_def=PARTITION_DEF,
-    group_name="challenge_1",
-)
-def order_book_report(
-    context: AssetExecutionContext,
-    fs_resource: FilesystemResource,
-) -> PandasDF:
-    """Report that displays the bid-ask spread from order books second by second.
-    This report is generated once every 10 minutes.
+def build_sparse_report(pdf: PandasDF) -> PandasDF:
+    """Transforms a dataframe of order books responses into a spread report.
+
+    Args:
+        pdf (PandasDF): Order books responses in pandas dataframe.
+
+    Returns:
+        PandasDF: Spread report
     """
-    start = context.partition_time_window.start
-    end = context.partition_time_window.end
-    data_dir: Path = fs_resource.path
-    pdf = duckdb.sql(
-        """select * from read_json_auto($dir) where updated_at between $start and $end""",
-        params={
-            "dir": str(data_dir / "order_books/**/*.json"),
-            "start": start.strftime("%Y-%m-%dT%H:%M"),
-            "end": end.strftime("%Y-%m-%dT%H:%M"),
-        },
-    ).df()
     pdf = pdf.drop_duplicates(subset=["updated_at", "sequence"])
     pdf = pdf.assign(
         book=pdf.bids.apply(lambda x: x[0]["book"]),
@@ -63,14 +52,40 @@ def order_book_report(
     return pdf
 
 
-@asset_check(asset=order_book_report)
+GROUP_NAME = "challenge_1"
+
+
+@asset(partitions_def=PARTITION_DEF, group_name=GROUP_NAME, key_prefix=[GROUP_NAME])
+def sparse_report(
+    context: AssetExecutionContext,
+    fs_resource: FilesystemResource,
+) -> PandasDF:
+    """Report that displays the bid-ask spread from order books second by second.
+    This report is generated once every 10 minutes.
+    """
+    start = context.partition_time_window.start
+    end = context.partition_time_window.end
+    data_dir: Path = fs_resource.path
+    pdf = duckdb.sql(
+        """select * from read_json_auto($dir) where updated_at between $start and $end""",
+        params={
+            "dir": str(data_dir / "json_order_books/**/*.json"),
+            "start": start.strftime("%Y-%m-%dT%H:%M"),
+            "end": end.strftime("%Y-%m-%dT%H:%M"),
+        },
+    ).df()
+
+    return build_sparse_report(pdf)
+
+
+@asset_check(asset=sparse_report)
 def spread_bigger_than_threshold(
     context: AssetCheckExecutionContext, fs_resource: FilesystemResource
 ) -> AssetCheckResult:
     pdf = duckdb.sql(
         """select count(1) over_limit from read_csv_auto($dir) where spread > $threshold""",
         params={
-            "dir": str(fs_resource.path / "order_book_report/**/*"),
+            "dir": str(fs_resource.path / "sparse_report/**/*"),
             "threshold": 1.0,
         },
     ).to_df()

@@ -3,9 +3,15 @@ import zipfile
 
 import duckdb
 import requests
-from dagster import DailyPartitionsDefinition, asset
+from dagster import (
+    AssetExecutionContext,
+    AssetIn,
+    DailyPartitionsDefinition,
+    TimeWindowPartitionMapping,
+    asset,
+)
 from pandas import DataFrame as PandasDF
-from pandas import read_csv
+from pandas import concat, read_csv
 
 GROUP_NAME = "challenge_2"
 PARTITION_DEF = DailyPartitionsDefinition(
@@ -19,43 +25,53 @@ def _get_response_io(url: str) -> io.BytesIO:
     return io.BytesIO(response.content)
 
 
-@asset(io_manager_key="pandas_duckdb_io", group_name=GROUP_NAME)
-def deposits() -> PandasDF:
+@asset(group_name=GROUP_NAME, partitions_def=PARTITION_DEF, key_prefix=[GROUP_NAME])
+def deposits(context: AssetExecutionContext) -> PandasDF:
     url = (
         "https://github.com/IMARVI/sr_de_challenge/raw/main/deposit_sample_data.csv.zip"
     )
+    start = context.asset_partition_key_range.start
+    context.log.info("Gathering data for partition %s", start)
     with zipfile.ZipFile(_get_response_io(url)) as _zip:
         with _zip.open("deposit_sample_data.csv") as _f:
             pdf = read_csv(_f)
 
-    return pdf
+    return pdf[pdf.event_timestamp.str.contains(start)]
 
 
-@asset(io_manager_key="pandas_duckdb_io", group_name=GROUP_NAME)
-def withdrawals() -> PandasDF:
+@asset(group_name=GROUP_NAME, partitions_def=PARTITION_DEF, key_prefix=[GROUP_NAME])
+def withdrawals(context: AssetExecutionContext) -> PandasDF:
     url = (
         "https://github.com/IMARVI/sr_de_challenge/raw/main/withdrawals_sample_data.csv"
     )
+    start = context.asset_partition_key_range.start
+    context.log.info("Gathering data for partition %s", start)
+    pdf = read_csv(_get_response_io(url))
 
-    return read_csv(_get_response_io(url))
+    return pdf[pdf.event_timestamp.str.contains(start)]
 
 
-@asset(io_manager_key="pandas_duckdb_io", group_name=GROUP_NAME)
-def events() -> PandasDF:
+@asset(group_name=GROUP_NAME, partitions_def=PARTITION_DEF, key_prefix=[GROUP_NAME])
+def events(context: AssetExecutionContext) -> PandasDF:
     url = "https://github.com/IMARVI/sr_de_challenge/raw/main/event_sample_data.csv"
+    start = context.asset_partition_key_range.start
+    context.log.info("Gathering data for partition %s", start)
+    pdf = read_csv(_get_response_io(url))
 
-    return read_csv(_get_response_io(url))
+    return pdf[pdf.event_timestamp.str.contains(start)]
 
 
-@asset(io_manager_key="pandas_duckdb_io", group_name=GROUP_NAME)
+@asset(group_name=GROUP_NAME, key_prefix=[GROUP_NAME])
 def user_ids() -> PandasDF:
     url = "https://github.com/IMARVI/sr_de_challenge/raw/main/user_id_sample_data.csv"
 
     return read_csv(_get_response_io(url))
 
 
-@asset(io_manager_key="pandas_duckdb_io", group_name=GROUP_NAME)
-def fct_transactions_summary(deposits: PandasDF, withdrawals: PandasDF) -> PandasDF:
+@asset(group_name=GROUP_NAME, partitions_def=PARTITION_DEF, key_prefix=[GROUP_NAME])
+def fct_transactions_summary(
+    context: AssetExecutionContext, deposits: PandasDF, withdrawals: PandasDF
+) -> PandasDF:
     sql = """
     with _transactions_union as (
         select date_trunc('day', event_timestamp::timestamp) date,
@@ -91,8 +107,8 @@ def fct_transactions_summary(deposits: PandasDF, withdrawals: PandasDF) -> Panda
     return duckdb.sql(sql).to_df()
 
 
-@asset(io_manager_key="pandas_duckdb_io", group_name=GROUP_NAME)
-def fct_logins_summary(events: PandasDF):
+@asset(group_name=GROUP_NAME, partitions_def=PARTITION_DEF, key_prefix=[GROUP_NAME])
+def fct_logins_summary(context: AssetExecutionContext, events: PandasDF):
     sql = """
     select date_trunc('day', event_timestamp::timestamp) date,
         user_id,
@@ -104,37 +120,34 @@ def fct_logins_summary(events: PandasDF):
     return duckdb.sql(sql).to_df()
 
 
-@asset(io_manager_key="pandas_duckdb_io", group_name=GROUP_NAME)
+@asset(group_name=GROUP_NAME, key_prefix=[GROUP_NAME])
 def dim_users(
-    deposits: PandasDF, withdrawals: PandasDF, user_ids: PandasDF, events: PandasDF
+    context: AssetExecutionContext,
+    fct_transactions_summary: dict[str, PandasDF],
+    fct_logins_summary: dict[str, PandasDF],
+    user_ids: PandasDF,
 ) -> PandasDF:
+    fct_logins_summary = concat(fct_logins_summary.values())  # type: ignore
+    fct_transactions_summary = concat(fct_transactions_summary.values())  # type: ignore
     sql = """
-    with _latest_deposits as (
+    with _latest_transactions as (
         select user_id,
-            max(event_timestamp::timestamp) latest_deposit_ts
-        from deposits
-        where tx_status = 'complete'
-        group by 1
-    ), _latest_withdrawals as (
-        select user_id,
-            max(event_timestamp::timestamp) latest_withdrawal_ts
-        from withdrawals
-        where tx_status = 'complete'
+            max(case when deposit_tx > 0 then date end) latest_deposit_ts,
+            max(case when withdrawal_tx > 0 then date end) latest_withdrawal_ts
+        from fct_transactions_summary
         group by 1
     ), _latest_logins as (
         select user_id,
-            max(event_timestamp::timestamp) latest_login_ts
-        from events
-        where event_name like '%login%'
+            max(date) latest_login_ts
+        from fct_logins_summary
         group by 1
     )
-    select u.user_id,
-        ld.latest_deposit_ts,
-        lw.latest_withdrawal_ts,
+    select u.user_id id,
+        lt.latest_deposit_ts,
+        lt.latest_withdrawal_ts,
         ll.latest_login_ts
     from user_ids u
-    left join _latest_deposits ld on ld.user_id = u.user_id
-    left join _latest_withdrawals lw on lw.user_id = u.user_id
+    left join _latest_transactions lt on lt.user_id = u.user_id
     left join _latest_logins ll on ll.user_id = u.user_id
     """
 

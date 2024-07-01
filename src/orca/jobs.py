@@ -1,41 +1,35 @@
+"""Definition of ELT jobs
+"""
+
 from dagster import (
     AssetSelection,
-    HookContext,
     build_schedule_from_partitioned_job,
     define_asset_job,
-    failure_hook,
 )
 
-from src.orca.assets.order_book_report import PARTITION_DEF, order_book_report
-from src.orca.assets.user_events import (
-    dim_users,
-    fct_logins_summary,
-    fct_transactions_summary,
+from src.orca.assets import order_books, user_events
+
+################################################
+# Challenge 1 Job
+
+challenge_1__job = define_asset_job(
+    name="challenge_1__job",
+    selection=AssetSelection.assets(order_books.sparse_report),
+    partitions_def=order_books.PARTITION_DEF,
+)
+challenge_1__schedule = build_schedule_from_partitioned_job(
+    challenge_1__job,
 )
 
+################################################
+# Challenge 2 Job
 
-@failure_hook()
-def send_failure_notification(context: HookContext):
-    pass
-    # message = f"Op {context.op.name} failed"
-    # context.resources.slack.chat_postMessage(channel="#foo", text=message)
-
-
-order_books_report__job = define_asset_job(
-    name="order_books_report__job",
-    selection=AssetSelection.assets(order_book_report),
-    partitions_def=PARTITION_DEF,
-    hooks={send_failure_notification},
-)
-order_books_report__schedule = build_schedule_from_partitioned_job(
-    order_books_report__job,
-)
-
-user_master_data__job = define_asset_job(
-    name="user_master_data__job",
+challenge_2__job = define_asset_job(
+    name="challenge_2__job",
     selection=AssetSelection.assets(
-        fct_logins_summary, fct_transactions_summary, dim_users
+        user_events.fct_logins_summary,
+        user_events.fct_transactions_summary,
+        user_events.dim_users,
     ).upstream(),
-    partitions_def=PARTITION_DEF,
-    hooks={send_failure_notification},
+    partitions_def=user_events.PARTITION_DEF,
 )
