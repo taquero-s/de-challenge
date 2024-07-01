@@ -1,46 +1,30 @@
+import tempfile
+from typing import Generator
+
 import pytest
-from pandas import DataFrame as PandasDF
-from pandas.testing import assert_frame_equal
 
-from src.hermes.consumer import DuckDBConsumer
+from src.hermes.consumer import Consumer
 
 
-class TestDuckDBConsumer:
+class TestConsumer:
     @pytest.fixture(scope="function")
-    def consumer(self) -> DuckDBConsumer:
-        consumer = DuckDBConsumer()
+    def consumer(self) -> Generator[Consumer, None, None]:
+        with tempfile.TemporaryDirectory() as _tmp:
+            consumer = Consumer(_tmp)
 
-        return consumer
+            yield consumer
 
-    def test_push_dataframe_on_pre_existent(self, consumer: DuckDBConsumer):
-        consumer.conn.sql("CREATE TABLE temporary AS SELECT 42 AS num")
+    def test_push_to_filesystem(self, consumer: Consumer):
+        """Test data is successfully pushed into a file system on ndjson format"""
+        records = [
+            {"message": 1},
+            {"message": 2},
+            {"message": 3},
+        ]
+        consumer.push_records(records)
 
-        pdf = PandasDF(data={"num": [43]})
-        consumer.push("temporary", pdf)
+        files = list(consumer.path.rglob("**/*.json"))
 
-        assert_frame_equal(
-            consumer.conn.sql("SELECT * FROM temporary").df(),
-            PandasDF(data={"num": [42, 43]}),
-            check_dtype=False,
-        )
+        assert len(files) == 1
 
-    def test_push_dataframe_on_non_existent(self, consumer: DuckDBConsumer):
-        pdf = PandasDF(data={"num": [42, 43]})
-        consumer.push("temporary", pdf)
-
-        assert_frame_equal(
-            consumer.conn.sql("SELECT * FROM temporary").df(),
-            PandasDF(data={"num": [42, 43]}),
-            check_dtype=False,
-        )
-
-    def test_push_to_custom_schema(self, consumer: DuckDBConsumer):
-        consumer.schema = "analytics"
-        pdf = PandasDF(data={"num": [42, 43]})
-        consumer.push("temporary", pdf)
-
-        assert_frame_equal(
-            consumer.conn.sql("SELECT * FROM analytics.temporary").df(),
-            PandasDF(data={"num": [42, 43]}),
-            check_dtype=False,
-        )
+        assert len(files[0].open().readlines()) == 3
