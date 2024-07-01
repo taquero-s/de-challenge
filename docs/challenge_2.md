@@ -65,7 +65,7 @@ with _rs as (
 )
 select distinct user_id
 from _rs
-where running_sum > 5 and date = '2022-10-01'
+where running_sum > 5 and date = {date}
 ```
 
 - When was the last time a user made a login
