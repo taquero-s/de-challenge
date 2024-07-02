@@ -113,3 +113,7 @@ from fct_transactions_summary
 where date = {date}
   and currency = {currency}
 ```
+
+## Results Location
+
+All results should be located within the `$DATA_DIR/challenge_2` folder set in the `.env` file

@@ -13,6 +13,12 @@ Run the dependency installation using:
 make dev
 ```
 
+Additionally, include a `.env` file on the root of the repository that includes a variable for the data directory. The contents of the file used for testing are:
+
+```bash
+export DATA_DIR=~/Data
+```
+
 ## Run Stream
 
 A streaming application was developed as part of the challenge's requirements. This application currently works as a side command and can be executed using the following command:
