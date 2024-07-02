@@ -1,4 +1,4 @@
-"""Custom resources and IO managers for orchestration storage
+"""Custom resources and IO managers for storage
 """
 
 from pathlib import Path

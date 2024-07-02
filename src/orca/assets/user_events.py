@@ -3,13 +3,7 @@ import zipfile
 
 import duckdb
 import requests
-from dagster import (
-    AssetExecutionContext,
-    AssetIn,
-    DailyPartitionsDefinition,
-    TimeWindowPartitionMapping,
-    asset,
-)
+from dagster import AssetExecutionContext, DailyPartitionsDefinition, asset
 from pandas import DataFrame as PandasDF
 from pandas import concat, read_csv
 
@@ -27,6 +21,7 @@ def _get_response_io(url: str) -> io.BytesIO:
 
 @asset(group_name=GROUP_NAME, partitions_def=PARTITION_DEF, key_prefix=[GROUP_NAME])
 def deposits(context: AssetExecutionContext) -> PandasDF:
+    """Raw deposits transactions events. Partitioned daily."""
     url = (
         "https://github.com/IMARVI/sr_de_challenge/raw/main/deposit_sample_data.csv.zip"
     )
@@ -41,6 +36,7 @@ def deposits(context: AssetExecutionContext) -> PandasDF:
 
 @asset(group_name=GROUP_NAME, partitions_def=PARTITION_DEF, key_prefix=[GROUP_NAME])
 def withdrawals(context: AssetExecutionContext) -> PandasDF:
+    """Raw widthrawals transactions events. Partitioned daily."""
     url = (
         "https://github.com/IMARVI/sr_de_challenge/raw/main/withdrawals_sample_data.csv"
     )
@@ -53,6 +49,9 @@ def withdrawals(context: AssetExecutionContext) -> PandasDF:
 
 @asset(group_name=GROUP_NAME, partitions_def=PARTITION_DEF, key_prefix=[GROUP_NAME])
 def events(context: AssetExecutionContext) -> PandasDF:
+    """Raw event data, containing application events for logins, mfa setup, user
+    registry, and more. Partitioned daily.
+    """
     url = "https://github.com/IMARVI/sr_de_challenge/raw/main/event_sample_data.csv"
     start = context.asset_partition_key_range.start
     context.log.info("Gathering data for partition %s", start)
@@ -63,6 +62,7 @@ def events(context: AssetExecutionContext) -> PandasDF:
 
 @asset(group_name=GROUP_NAME, key_prefix=[GROUP_NAME])
 def user_ids() -> PandasDF:
+    """Raw user ids data"""
     url = "https://github.com/IMARVI/sr_de_challenge/raw/main/user_id_sample_data.csv"
 
     return read_csv(_get_response_io(url))
@@ -72,6 +72,7 @@ def user_ids() -> PandasDF:
 def fct_transactions_summary(
     context: AssetExecutionContext, deposits: PandasDF, withdrawals: PandasDF
 ) -> PandasDF:
+    """Fact table that summarizes a user's transaction data on daily partition."""
     sql = """
     with _transactions_union as (
         select date_trunc('day', event_timestamp::timestamp) date,
@@ -109,6 +110,7 @@ def fct_transactions_summary(
 
 @asset(group_name=GROUP_NAME, partitions_def=PARTITION_DEF, key_prefix=[GROUP_NAME])
 def fct_logins_summary(context: AssetExecutionContext, events: PandasDF):
+    """Fact table that summarizes user login information on daily partitions"""
     sql = """
     select date_trunc('day', event_timestamp::timestamp) date,
         user_id,
@@ -127,6 +129,7 @@ def dim_users(
     fct_logins_summary: dict[str, PandasDF],
     user_ids: PandasDF,
 ) -> PandasDF:
+    """Dimension table for user data."""
     fct_logins_summary = concat(fct_logins_summary.values())  # type: ignore
     fct_transactions_summary = concat(fct_transactions_summary.values())  # type: ignore
     sql = """

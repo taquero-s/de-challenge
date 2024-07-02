@@ -82,6 +82,8 @@ def sparse_report(
 def spread_bigger_than_threshold(
     context: AssetCheckExecutionContext, fs_resource: FilesystemResource
 ) -> AssetCheckResult:
+    """Validate that the data within the dataframe does not exceed the
+    corresponding threshold."""
     pdf = duckdb.sql(
         """select count(1) over_limit from read_csv_auto($dir) where spread > $threshold""",
         params={

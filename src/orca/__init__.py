@@ -1,3 +1,5 @@
+"""Dagster framework initialization"""
+
 from dagster import (
     Definitions,
     EnvVar,
