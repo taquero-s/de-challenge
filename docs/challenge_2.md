@@ -114,6 +114,17 @@ where date = {date}
   and currency = {currency}
 ```
 
-## Results Location
+## ETL Workflow
+
+Within Dagster's UI, the workflows are visible under `Overview > Jobs`:
+
+![image](./assets/challenge_2_1.png)
+
+From the job visualization, it can be manually triggered using the materialize button. When prompted, it is recommended to only materialize an individual partition. Since the source data for this job has a date limit, the implementation of schedules was out of scope.
+
+![image](./assets/challenge_2_2.png)
+
+
+### Results Location
 
 All results should be located within the `$DATA_DIR/challenge_2` folder set in the `.env` file
